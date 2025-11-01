@@ -1,0 +1,47 @@
+/* Import Google Fonts (alternative to <link> in index.html) */
+/* @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap'); */
+
+/* Tailwind directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Your custom styles */
+body {
+    font-family: 'Inter', 'sans-serif';
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+}
+
+.status-pending {
+    background-color: #6b7280;
+}
+
+.status-processing {
+    background-color: #3b82f6;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.status-completed {
+    background-color: #22c55e;
+}
+
+.status-failed {
+    background-color: #ef4444;
+}
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: .5;
+    }
+}
