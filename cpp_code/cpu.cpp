@@ -268,7 +268,7 @@ int main(int argc, char** argv)
     std::cout << "}\n";
 
     // Create file path for JSON
-    std::string json_path = (fs::path(output_folder) / "time.json").string();
+    std::string json_path = (fs::path(output_folder) / "timings.json").string();
     std::ofstream json_file(json_path); // <-- Create file stream
 
     json_file << std::fixed << std::setprecision(4);

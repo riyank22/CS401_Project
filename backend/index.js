@@ -162,6 +162,8 @@ app.post('/api/benchmark/start', async (req, res) => {
     console.error('Failed to create job:', error);
     res.status(500).send({ error: 'Failed to initialize job' });
   }
+  // res.status(202).send({ job_id: "job_fcf92def-498e-402e-8746-dee0a3eb434a", status:'processing' });
+  
 });
 
 // --- API Endpoint 2: Get Job Status (Polling) ---
@@ -225,12 +227,12 @@ app.get('/api/benchmark/result/:job_id', async (req, res) => {
 });
 
 // --- Start Server ---
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   // Ensure the main 'jobs' directory exists on startup
   try {
     await fs.mkdir(JOBS_DIR, { recursive: true });
     console.log(`Jobs directory ensured at: ${JOBS_DIR}`);
-    console.log(`Server running at http://localhost:${PORT}`);
+    console.log(`Server running at http://0.0.0.0:${PORT} (listening on all interfaces)`);
   } catch (error) {
     console.error('Failed to create jobs directory:', error);
     process.exit(1);
