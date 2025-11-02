@@ -209,6 +209,8 @@ async function getJobResultHandler(req, res) {
     let inputImages = [];
     let batchSize = 0;
 
+    const operation = status.filter_type;
+
     try {
       const filenames = await fs.readdir(inputDir);
       for (const filename of filenames) {
@@ -223,14 +225,18 @@ async function getJobResultHandler(req, res) {
         //   height: dimensions.height,
         };
 
+        const parsed = path.parse(filename);
+        const baseName = parsed.name;
+        const outFilename = `${baseName}_${operation}.png`;
+
         if (status.cuda === 'completed') {
-          imageObject.cuda_output_url = `/public/jobs/${job_id}/output_cuda/${filename}`;
+          imageObject.cuda_output_url = `/public/jobs/${job_id}/output_cuda/${outFilename}`;
         }
         if (status.openmp === 'completed') {
-          imageObject.openmp_output_url = `/public/jobs/${job_id}/output_openmp/${filename}`;
+          imageObject.openmp_output_url = `/public/jobs/${job_id}/output_openmp/${outFilename}`;
         }
         if (status.mpi === 'completed') {
-          imageObject.mpi_output_url = `/public/jobs/${job_id}/output_mpi/${filename}`;
+          imageObject.mpi_output_url = `/public/jobs/${job_id}/output_mpi/${outFilename}`;
         }
 
         inputImages.push(imageObject);
@@ -262,6 +268,27 @@ async function getJobResultHandler(req, res) {
   } catch (error) {
     console.error(`[Job ${job_id}] Error in getJobResultHandler:`, error);
     res.status(500).json({ error: 'Failed to retrieve job results' });
+  }
+}
+
+async function getJobResultList(req, res)
+{
+  try {
+    const entries = await fs.readdir(jobsDir);
+    const jobIds = [];
+    for (const name of entries) {
+      const fullPath = path.join(jobsDir, name);
+      try {
+        const stat = await fs.stat(fullPath);
+        if (stat.isDirectory() && name.startsWith('job_')) jobIds.push(name);
+      } catch (e) {
+        // ignore unreadable entries
+      }
+    }
+    res.json({ jobs: jobIds });
+  } catch (error) {
+    console.error('Failed to list jobs:', error);
+    res.status(500).json({ error: 'Failed to list jobs' });
   }
 }
 
@@ -356,8 +383,7 @@ app.get('/api/jobs/result/:job_id', getJobResultHandler);
  * ENDPOINT 4: Get Previous Job (Alias)
  * - Calls the "smart" handler.
  */
-// Tweak 3: Removed the /api/jobs/previous/:job_id endpoint
-// app.get('/api/jobs/previous/:job_id', getJobResultHandler);
+app.get('/api/jobs/list', getJobResultList);
 
 // =============================================================================
 //   4. START THE SERVER

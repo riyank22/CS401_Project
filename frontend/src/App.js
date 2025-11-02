@@ -1,6 +1,6 @@
 import React from 'react';
 import JobDashboard from './components/JobDashboard';
-import Uploader from './components/Uploader';
+import HomePage from "./components/HomePage";
 
 /**
  * App Component (Main Entry Point)
@@ -16,7 +16,7 @@ function App() {
     }
 
     // We are on the home page
-    return <Uploader />;
+    return <HomePage />;
 }
 
 export default App;
