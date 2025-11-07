@@ -65,7 +65,6 @@ const binDir = path.join(__dirname, 'bin');
 // --- Middleware ---
 app.use(cors()); // Allow cross-origin requests
 app.use(express.json()); // Parse JSON bodies
-app.use('/public', express.static(publicDir)); // Serve static files
 
 // Ensure required directories exist
 fs.ensureDirSync(jobsDir);
@@ -209,7 +208,7 @@ async function getJobResultHandler(req, res) {
     let inputImages = [];
     let batchSize = 0;
 
-    const operation = status.filter_type;
+    const operation = status.operation || status.filter_type;
 
     try {
       const filenames = await fs.readdir(inputDir);
@@ -333,7 +332,7 @@ app.post('/api/jobs/submit', upload.array('files'), async (req, res) => {
     // 3. Create initial status.json
     const initialState = {
       job_id: jobId,
-      filter_type: filter_type,
+      operation: filter_type,
       status: 'pending',
       cuda: 'pending',
       openmp: 'pending',
@@ -362,16 +361,65 @@ app.post('/api/jobs/submit', upload.array('files'), async (req, res) => {
  * - Reads and returns the status.json file.
  */
 app.get('/api/jobs/status/:job_id', async (req, res) => {
-  const { job_id } = req.params;
-  const statusPath = path.join(jobsDir, job_id, 'status.json');
+    const { job_id } = req.params;
+    const statusPath = path.join(jobsDir, job_id, 'status.json');
 
-  try {
-    const status = await fs.readJson(statusPath);
-    res.json(status);
-  } catch (error) {
-    res.status(404).json({ error: 'Job not found or status file unreadable.' });
-  }
+    try {
+        const status = await fs.readJson(statusPath);
+        res.json(status);
+    } catch (error) {
+        res.status(404).json({ error: 'Job not found or status file unreadable.' });
+    }
 });
+
+
+async function getJobResultList(req, res)
+{
+  try {
+    const entries = await fs.readdir(jobsDir);
+    const jobs = [];
+    for (const name of entries) {
+      const fullPath = path.join(jobsDir, name);
+      try {
+        const stat = await fs.stat(fullPath);
+        if (!stat.isDirectory() || !name.startsWith('job_')) continue;
+
+        const statusPath = path.join(fullPath, 'status.json');
+        if (await fs.pathExists(statusPath)) {
+          try {
+            const status = await fs.readJson(statusPath);
+            jobs.push({
+              job_id: name,
+              status: status.status || null,
+              operation: status.operation || status.filter_type || null,
+              batch_size: typeof status.batch_size !== 'undefined' ? status.batch_size : null,
+              last_updated: status.last_updated || null
+            });
+          } catch (e) {
+            jobs.push({ job_id: name, error: 'status.json unreadable' });
+          }
+        } else {
+          jobs.push({ job_id: name, error: 'status.json missing' });
+        }
+      } catch (e) {
+        // ignore unreadable entries
+      }
+    }
+
+    // Sort so the lastly processed job appears first.
+    // Uses `last_updated` (descending) with fallback to `submitted_at`.
+    jobs.sort((a, b) => {
+      const aTime = Date.parse(a.last_updated) || Date.parse(a.submitted_at) || 0;
+      const bTime = Date.parse(b.last_updated) || Date.parse(b.submitted_at) || 0;
+      return bTime - aTime;
+    });
+
+    res.json({ jobs });
+  } catch (error) {
+    console.error('Failed to list jobs:', error);
+    res.status(500).json({ error: 'Failed to list jobs' });
+  }
+}
 
 /**
  * ENDPOINT 3: Get Job Results (Main Data)
@@ -389,8 +437,10 @@ app.get('/api/jobs/list', getJobResultList);
 //   4. START THE SERVER
 // =============================================================================
 
+app.use('/public', express.static(publicDir)); // Serve static files
+
 // Serve the SPA entrypoint
-app.get('/', (req, res) => {
+app.use((req, res) => {
     const indexPath = path.join(publicDir, 'index.html');
     if (!fs.existsSync(indexPath)) {
         return res.status(404).send('index.html not found');
@@ -398,12 +448,12 @@ app.get('/', (req, res) => {
     res.sendFile(indexPath);
 });
 
-app.listen(port, () => {
-  console.log(`=======================================================`);
-  console.log(`  Benchmark API Server is running!`);
-  console.log(`  Backend API: http://localhost:${port}/api/...`);
-  console.log(`  Static Files: http://localhost:${port}/public/...`);
-  console.log(`=======================================================`);
-  console.log(`\nMonitoring for jobs...`);
-});
+app.listen(port, '0.0.0.0', () => {
+    console.log(`=======================================================`);
+    console.log(`  Benchmark API Server is running!`);
+    console.log(`  Backend API: http://0.0.0.0:${port}/api/...`);
+    console.log(`  Static Files: http://0.0.0.0:${port}/public/...`);
+    console.log(`=======================================================`);
+    console.log(`\nMonitoring for jobs...`);
+  });
 

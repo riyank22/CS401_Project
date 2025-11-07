@@ -6,6 +6,7 @@ import { API_BASE_URL } from '../config';
  * Displays a grid of the original input images and their per-engine times.
  */
 function ImageGrid({ result, onImageClick }) {
+    console.log(result);
     if (!result || !result.input_images || result.input_images.length === 0) {
         return (
             <div className="bg-gray-850 p-6 rounded-lg shadow-lg border border-gray-700 text-center">

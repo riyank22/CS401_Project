@@ -21,7 +21,7 @@ __global__ void grayscale_kernel(const unsigned char* input, unsigned char* outp
 
 // ==================== GAUSSIAN BLUR ====================
 // Kernel size is 81 (9x9)
-__constant__ float GAUSSIAN_KERNEL[27*27];
+__constant__ float GAUSSIAN_KERNEL[9*9];
 
 __global__ void gaussian_blur_kernel_color(const unsigned char* input,
                                            unsigned char* output,

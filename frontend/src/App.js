@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useEffect} from 'react';
 import JobDashboard from './components/JobDashboard';
 import HomePage from "./components/HomePage";
 

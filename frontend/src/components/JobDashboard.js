@@ -6,7 +6,7 @@ import StatusIndicator from './StatusIndicator';
 import StatCard from './StatCard';
 import BenchmarkChart from './BenchmarkChart';
 import ImageGrid from './ImageGrid';
-import Icon from './Icon';
+import Icon from "./Icon";
 
 /**
  * JobDashboard Component
@@ -18,6 +18,7 @@ function JobDashboard({ jobId }) {
     const [result, setResult] = useState(null);
     const [error, setError] = useState(null);
     const [modalImage, setModalImage] = useState(null);
+    const [operation, setOperation] = useState(null);
 
     // 1. Polling useEffect for /status
     useEffect(() => {
@@ -33,6 +34,7 @@ function JobDashboard({ jobId }) {
                 }
                 const data = await res.json();
                 setStatus(data);
+                setOperation(data.operation);
 
                 if (data.status === 'completed' || data.status === 'failed') {
                     clearInterval(intervalId);
@@ -56,7 +58,9 @@ function JobDashboard({ jobId }) {
         }
 
         // Don't refetch if we already have the data for this status
-        if (result && result.status_details.last_updated === status.last_updated) {
+        // Use optional chaining and remove 'result' from dependency array
+        // to prevent potential re-fetch loops.
+        if (result?.status_details?.last_updated === status.last_updated) {
             return;
         }
 
@@ -74,7 +78,7 @@ function JobDashboard({ jobId }) {
         };
 
         fetchResult();
-    }, [status, jobId, result]); // Added 'result' to dependencies
+    }, [status, jobId]); // <-- REMOVED 'result' from dependencies
 
     if (error) {
         return (
@@ -100,12 +104,36 @@ function JobDashboard({ jobId }) {
     const isLoading = !result;
     const jobStatus = status.status;
 
-    // Use the total loading/exporting time from the first completed engine
-    const cudaLoadTime = result?.cuda_data?.total_loading_time;
-    const openmpLoadTime = result?.openmp_data?.total_loading_time;
+    // --- START: MODIFIED LOGIC FOR AVERAGES ---
 
-    const cudaExportTime = result?.cuda_data?.total_exporting_time;
-    const openmpExportTime = result?.openmp_data?.total_exporting_time;
+    let totalLoad = 0;
+    let loadCount = 0;
+    let totalExport = 0;
+    let exportCount = 0;
+
+    // Create an array of potential data sources
+    const dataSources = [result?.cuda_data, result?.openmp_data, result?.mpi_data];
+
+    // Iterate over the sources and add to totals if they exist
+    dataSources.forEach(data => {
+        // Check for loading time
+        if (data && typeof data.total_loading_time === 'number') {
+            totalLoad += data.total_loading_time;
+            loadCount++;
+        }
+        // Check for exporting time
+        if (data && typeof data.total_exporting_time === 'number') {
+            totalExport += data.total_exporting_time;
+            exportCount++;
+        }
+    });
+
+    // Calculate averages, handling division by zero
+    const avgLoadTime = loadCount > 0 ? totalLoad / loadCount : null;
+    const avgExportTime = exportCount > 0 ? totalExport / exportCount : null;
+
+    // --- END: MODIFIED LOGIC FOR AVERAGES ---
+
 
     return (
         <div className="min-h-full p-4 sm:p-8 bg-gray-900">
@@ -141,8 +169,7 @@ function JobDashboard({ jobId }) {
 
                 {jobStatus === 'completed' && (
                     <div className="mt-4 bg-green-900 border border-green-700 text-green-100 px-4 py-3 rounded-lg" role="alert">
-                        <strong className="font-bold">Job Completed!</strong>
-                        <span className="block sm:inline">All benchmarks finished. Results are final.</span>
+                        <span className="block sm:inline">All benchmarks finished.</span>
                     </div>
                 )}
             </header>
@@ -152,34 +179,36 @@ function JobDashboard({ jobId }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     {/* Status Cards */}
                     <div className="bg-gray-800 rounded-lg p-5 shadow-lg space-y-4">
-                        <h3 className="text-lg font-semibold text-white">Engine Status</h3>
-                        <StatusIndicator status={status.cuda} />
-                        <StatusIndicator status={status.openmp} />
-                        <StatusIndicator status={status.mpi} />
+                        <h3 className="text-lg font-semibold text-white">Compute Engine Status</h3>
+                        <StatusIndicator computeName={"CUDA"} status={status.cuda} />
+                        <StatusIndicator computeName={"OpenMP"} status={status.openmp} />
+                        <StatusIndicator computeName={"MPI"} status={status.mpi} />
                     </div>
 
                     {/* Summary Cards */}
                     <StatCard
                         title="Batch Size"
-                        value={isLoading ? '...' : result.batch_size}
-                        unit="images"
-                        iconName="Copy"
+                        value={isLoading ? '...' : result.batch_size }
+                        unit=" Images"
                         loading={isLoading}
                     />
+
+                    {/* --- START: MODIFIED STAT CARDS --- */}
                     <StatCard
-                        title="Total Load Time"
-                        value={cudaLoadTime ? cudaLoadTime.toFixed(2) : (openmpLoadTime ? openmpLoadTime.toFixed(2) : '...')}
+                        title="Average Load Time"
+                        value={avgLoadTime ? avgLoadTime.toFixed(2) : '...'}
                         unit="ms"
                         iconName="DownloadCloud"
                         loading={isLoading}
                     />
                     <StatCard
-                        title="Total Export Time"
-                        value={cudaExportTime ? cudaExportTime.toFixed(2) : (openmpExportTime ? openmpExportTime.toFixed(2) : '...')}
+                        title="Average Export Time"
+                        value={avgExportTime ? avgExportTime.toFixed(2) : '...'}
                         unit="ms"
                         iconName="UploadCloud"
                         loading={isLoading}
                     />
+                    {/* --- END: MODIFIED STAT CARDS --- */}
                 </div>
 
                 {/* --- Main Chart --- */}

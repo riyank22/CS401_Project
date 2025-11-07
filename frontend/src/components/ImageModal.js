@@ -5,27 +5,80 @@ import Icon from './Icon';
 import Spinner from './Spinner';
 
 /**
+ * Formats a time in milliseconds to either seconds (s) or milliseconds (ms).
+ * @param {number | null | undefined} ms - The time in milliseconds.
+ * @returns {string} - The formatted string (e.g., "1.23 s" or "456.78 ms").
+ */
+const formatTime = (ms) => {
+    // Handle null, undefined, or 0
+    if (!ms) {
+        return '...';
+    }
+
+    if (ms >= 1000) {
+        // Convert to seconds
+        return `${(ms / 1000).toFixed(2)} s`;
+    }
+
+    // Keep in milliseconds
+    return `${ms.toFixed(2)} ms`;
+};
+
+// --- ADDITION 1: Helper function to calculate average stats for a single image ---
+// This is the same powerful helper we used in ImageGrid.
+const getImageStats = (result, filename) => {
+    let totalLoad = 0, loadCount = 0;
+    let totalExport = 0, exportCount = 0;
+
+    const dataSources = [result?.cuda_data, result?.openmp_data, result?.mpi_data];
+
+    dataSources.forEach(data => {
+        if (data && data.individual_image_times) {
+            const imgData = data.individual_image_times.find(t => t.image_name === filename);
+            if (imgData) {
+                if (typeof imgData.load_ms === 'number') { totalLoad += imgData.load_ms; loadCount++; }
+                if (typeof imgData.export_ms === 'number') { totalExport += imgData.export_ms; exportCount++; }
+            }
+        }
+    });
+
+    return {
+        avgLoad: loadCount > 0 ? totalLoad / loadCount : null,
+        avgExport: exportCount > 0 ? totalExport / exportCount : null,
+    };
+};
+
+// --- ADDITION 2: A small component to display a single stat nicely ---
+const StatDisplay = ({ label, value, unit }) => (
+    <div className="text-center sm:text-right">
+        <p className="text-xs text-gray-400 font-medium">{label}</p>
+        <p className="text-lg font-semibold text-white whitespace-nowrap">
+            {value !== null ? `${value.toFixed(2)} ${unit}` : '...'}
+        </p>
+    </div>
+);
+
+
+/**
  * ImageModal Component
  * The full-screen "drill-down" view with SYNCHRONIZED 4-way zoom and pan.
  */
-function ImageModal({ job_id, filename, result, onClose }) {
-    // NEW: State to hold the shared transform (zoom, position)
+function ImageModal({ filename, result, onClose }) {
     const [transform, setTransform] = useState({
         scale: 1,
         positionX: 0,
         positionY: 0,
     });
 
-    // NEW: Handler function to update the shared state
-    // This is called by ANY of the four zoom components when it's moved
     const handleTransform = (ref) => {
         setTransform(ref.state);
     };
 
-    // Find the specific image object from the result
     const inputImage = result.input_images.find(img => img.filename === filename);
 
-    // Helper to get engine-specific data for *this* image
+    // --- ADDITION 3: Calculate the average stats for the current image ---
+    const imageStats = getImageStats(result, filename);
+
     const getImageData = (engineName, data) => {
         if (!data || !inputImage) return { url: null, time: null, status: result.status_details[engineName] };
         const imageTimeData = data.individual_image_times?.find(t => t.image_name === filename);
@@ -36,7 +89,6 @@ function ImageModal({ job_id, filename, result, onClose }) {
         }
     };
 
-    // Construct the 4-panel data
     const engines = [
         { name: 'Original', data: { url: `${API_BASE_URL}${inputImage?.url}`, time: null, status: 'completed' } },
         { name: 'CUDA', data: getImageData('cuda', result.cuda_data) },
@@ -44,7 +96,6 @@ function ImageModal({ job_id, filename, result, onClose }) {
         { name: 'MPI', data: getImageData('mpi', result.mpi_data) },
     ];
 
-    // Handle Escape key to close modal
     useEffect(() => {
         const handleEsc = (event) => {
             if (event.keyCode === 27) onClose();
@@ -53,6 +104,7 @@ function ImageModal({ job_id, filename, result, onClose }) {
         return () => window.removeEventListener('keydown', handleEsc);
     }, [onClose]);
 
+    // renderImageTile function remains unchanged...
     const renderImageTile = (engine) => {
         const { url, time, status } = engine.data;
         let content;
@@ -131,7 +183,6 @@ function ImageModal({ job_id, filename, result, onClose }) {
         );
     }
 
-    // This is the main modal structure (unchanged)
     return (
         <div
             className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4 sm:p-8 overflow-auto"
@@ -141,19 +192,28 @@ function ImageModal({ job_id, filename, result, onClose }) {
                 className="bg-gray-850 rounded-2xl shadow-2xl p-4 w-full h-full max-h-[95vh] border border-gray-700 flex flex-col"
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Header */}
-                <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-700">
-                    <div>
-                        <h2 className="text-2xl font-bold text-white">Image Drill-Down</h2>
-                        <p className="text-gray-400">{filename} ({inputImage.width}x{inputImage.height})</p>
+                {/* --- MODIFIED HEADER --- */}
+                <div className="flex justify-between items-center mb-4 pb-4 border-b border-gray-700 flex-wrap gap-4">
+                    {/* Left side: Title and filename */}
+                    <div className="flex-shrink-0">
+                        <h2 className="text-2xl font-bold text-white">Resultant Images</h2>
+                        {/* Added truncation for very long filenames */}
+                        <p className="text-gray-400 truncate max-w-xs sm:max-w-sm md:max-w-md" title={filename}>{filename}</p>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="text-gray-500 hover:text-white transition-colors p-1"
-                    >
-                        <Icon name="X" className="w-8 h-8" />
-                    </button>
+
+                    {/* Right side: Average Stats and Close Button */}
+                    <div className="flex items-center gap-6 sm:gap-8">
+                        <StatDisplay label="Avg. Load" value={imageStats.avgLoad} unit="ms" />
+                        <StatDisplay label="Avg. Export" value={imageStats.avgExport} unit="ms" />
+                        <button
+                            onClick={onClose}
+                            className="text-gray-500 hover:text-white transition-colors p-1"
+                        >
+                            <Icon name="X" className="w-8 h-8" />
+                        </button>
+                    </div>
                 </div>
+                {/* --- END MODIFIED HEADER --- */}
 
                 {/* 2x2 Image Grid */}
                 <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-4 overflow-auto">

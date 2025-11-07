@@ -4,7 +4,7 @@ import React from 'react';
  * StatusIndicator Component
  * Shows a colored dot and text for job status.
  */
-function StatusIndicator({ status }) {
+function StatusIndicator({ computeName,status }) {
     const baseClass = 'status-dot';
     let statusClass = 'status-pending';
     let text = 'Pending';
@@ -30,7 +30,7 @@ function StatusIndicator({ status }) {
     return (
         <div className="flex items-center">
             <span className={`${baseClass} ${statusClass}`}></span>
-            <span className="capitalize text-sm font-medium">{text}</span>
+            <span className="capitalize text-sm font-medium text-white">{computeName}: {text}</span>
         </div>
     );
 }
