@@ -116,6 +116,24 @@ function runExecutable(jobId, exeName, inputDir, outputDir, filterType) {
   });
 }
 
+function runMPI(jobId, exeName, inputDir, outputDir, filterType) {
+      const exePath = path.join(binDir, exeName);
+      const args = ['--use-hwthread-cpus','-n', '8', exePath, inputDir, outputDir, filterType];
+
+      console.log(`[Job ${jobId}] Running: mpirun ${args.slice(0,2).join(' ')} ${exePath} ${[inputDir, outputDir, filterType].join(' ')}`);
+
+      return new Promise((resolve, reject) => {
+        execFile('mpirun', args, (error, stdout, stderr) => {
+          if (error) {
+            console.error(`[Job ${jobId}] Executable Error (${exeName}):`, stderr);
+            return reject(new Error(`Error running MPI (${exeName}): ${stderr || error.message}`));
+          }
+          console.log(`[Job ${jobId}] Executable Output (${exeName}):`, stdout);
+          resolve(stdout);
+        });
+      });
+    }
+
 /**
  * The main asynchronous background task for running the sequential benchmark.
  * This is "fire-and-forget" from the /submit endpoint.
@@ -146,7 +164,7 @@ async function runFullBenchmarkSequentially(jobId, filterType) {
     currentStep = 'mpi';
     const mpiOutDir = path.join(jobDir, 'output_mpi');
     await updateStatus(jobId, { status: 'processing_mpi', mpi: 'processing' });
-    await runExecutable(jobId, 'GPU', inputDir, mpiOutDir, filterType); // Changed from 'filter_mpi'
+    await runMPI(jobId, 'MPI', inputDir, mpiOutDir, filterType); // Changed from 'filter_mpi'
     await updateStatus(jobId, { mpi: 'completed' });
 
     // 4. All Done
