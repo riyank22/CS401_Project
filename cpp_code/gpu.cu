@@ -7,21 +7,19 @@
 #include <chrono>
 #include <sstream>
 #include <cuda_runtime.h>
-#include <iomanip> // For std::setprecision
+#include <iomanip> 
 #include <fstream>
 
-// STB Image libraries
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image.h"
 #include "stb_image_write.h"
 
-// Our CUDA kernels
 #include "filters.cuh"
 
 namespace fs = std::filesystem;
 
-// Image struct with timers
 struct Image {
     std::string name, ext;
     int width, height, channels_in;
@@ -33,7 +31,7 @@ struct Image {
     float time_gpu_ms = 0.0f;
     float time_save_ms = 0.0f;
 
-    // Helper to sanitize name for JSON
+
     std::string get_json_name() const {
         std::string full_name = name + ext;
         std::string safe_name;
@@ -50,7 +48,7 @@ struct Image {
     }
 };
 
-// ==================== KERNEL DEFINITIONS ====================
+
 const float GAUSSIAN_9x9[81] = {
     1.16788635e-02f, 1.19232554e-02f, 1.21009460e-02f, 1.22088289e-02f, 1.22450031e-02f, 1.22088289e-02f, 1.21009460e-02f, 1.19232554e-02f, 1.16788635e-02f,
     1.19232554e-02f, 1.21727614e-02f, 1.23541704e-02f, 1.24643108e-02f, 1.25012421e-02f, 1.24643108e-02f, 1.23541704e-02f, 1.21727614e-02f, 1.19232554e-02f,
@@ -65,12 +63,12 @@ const float GAUSSIAN_9x9[81] = {
 
 const float sobel_x[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
 const float sobel_y[9] = {-1, -2, -1, 0, 0, 0, 1, 2, 1};
-// ========================================================
+
 
 
 int main(int argc, char** argv)
 {
-    // --- 1. Argument and Folder Setup ---
+
     if (argc < 4) {
         std::cerr << "Usage: ./ProjectCode <input_folder> <output_folder> <operation>\n";
         std::cerr << "Operations: grayscale | gaussian | sobel\n";
@@ -99,7 +97,6 @@ int main(int argc, char** argv)
     size_t max_input_bytes = 0;
     size_t max_output_bytes = 0;
 
-    // --- 2. Load all images from host memory (with timing) ---
     for (const auto& entry : fs::directory_iterator(folder)) {
         if (!entry.is_regular_file()) continue;
         Image img;
@@ -127,7 +124,6 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // --- 3. Upload constant kernel data to GPU ---
     if (op == "gaussian") {
         cudaMemcpyToSymbol(GAUSSIAN_KERNEL, GAUSSIAN_9x9, sizeof(GAUSSIAN_9x9));
     }
@@ -136,7 +132,6 @@ int main(int argc, char** argv)
         cudaMemcpyToSymbol(SOBEL_Y, sobel_y, sizeof(sobel_y));
     }
 
-    // --- 4. Allocate reusable device buffers ---
     unsigned char *d_input, *d_output;
     cudaMalloc(&d_input, max_input_bytes);
     cudaMalloc(&d_output, max_output_bytes);
@@ -145,7 +140,6 @@ int main(int argc, char** argv)
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    // --- 5. Process all images (with per-image timing) ---
     for (auto& img : images) {
         size_t inSize = (size_t)img.width * img.height * img.channels_in;
         size_t outSize = (size_t)img.width * img.height * img.channels_out;
@@ -165,7 +159,6 @@ int main(int argc, char** argv)
         cudaEventElapsedTime(&img.time_gpu_ms, start, stop);
     }
 
-    // --- 6. Save all outputs to disk (MULTITHREADED) ---
     std::vector<std::thread> save_threads;
     for (auto& img : images) {
         save_threads.emplace_back([&img, output_folder, op]() {
@@ -184,7 +177,6 @@ int main(int argc, char** argv)
     }
     for (auto& t : save_threads) { t.join(); }
 
-    // --- 7. Calculate Totals and Print JSON to stdout ---
     float total_load_ms = 0.0f;
     float total_process_ms = 0.0f;
     float total_export_ms = 0.0f;
@@ -195,7 +187,6 @@ int main(int argc, char** argv)
         total_export_ms += img.time_save_ms;
     }
 
-    // Set fixed-point notation for consistent float output
     std::cout << std::fixed << std::setprecision(4);
 
     std::cout << "{\n";
@@ -216,10 +207,8 @@ int main(int argc, char** argv)
 
     std::cout << "  ]\n";
     std::cout << "}\n";
-
-    // Create file path for JSON
     std::string json_path = (fs::path(output_folder) / "timings.json").string();
-    std::ofstream json_file(json_path); // <-- Create file stream
+    std::ofstream json_file(json_path); 
 
     json_file << std::fixed << std::setprecision(4);
     json_file << "{\n";
@@ -240,9 +229,8 @@ int main(int argc, char** argv)
 
     json_file << "  ]\n";
     json_file << "}\n";
-    json_file.close(); // <-- Close the file
+    json_file.close(); 
 
-    // --- 8. Clean up device memory ---
     cudaFree(d_input);
     cudaFree(d_output);
     cudaEventDestroy(start);

@@ -23,16 +23,13 @@ struct ImageTiming {
     double export_ms;
 };
 
-// ==================== KERNEL DEFINITIONS ====================
-// Standard 3x3 Sobel
+
 const int KERNEL_SIZE_SOBEL = 3;
 const float sobel_x[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
 const float sobel_y[9] = {-1, -2, -1, 0, 0, 0, 1, 2, 1};
 
-// Standard 27x27 Gaussian
 const int KERNEL_SIZE_GAUSSIAN = 9;
-const int GAUSSIAN_RADIUS = 4; // (27 / 2)
-// --- PASTE YOUR 27x27 GAUSSIAN KERNEL HERE ---
+const int GAUSSIAN_RADIUS = 4; // (9 / 2)
 const float GAUSSIAN_9x9[81] = {
     1.16788635e-02f, 1.19232554e-02f, 1.21009460e-02f, 1.22088289e-02f, 1.22450031e-02f, 1.22088289e-02f, 1.21009460e-02f, 1.19232554e-02f, 1.16788635e-02f,
     1.19232554e-02f, 1.21727614e-02f, 1.23541704e-02f, 1.24643108e-02f, 1.25012421e-02f, 1.24643108e-02f, 1.23541704e-02f, 1.21727614e-02f, 1.19232554e-02f,
@@ -44,10 +41,9 @@ const float GAUSSIAN_9x9[81] = {
     1.19232554e-02f, 1.21727614e-02f, 1.23541704e-02f, 1.24643108e-02f, 1.25012421e-02f, 1.24643108e-02f, 1.23541704e-02f, 1.21727614e-02f, 1.19232554e-02f,
     1.16788635e-02f, 1.19232554e-02f, 1.21009460e-02f, 1.22088289e-02f, 1.22450031e-02f, 1.22088289e-02f, 1.21009460e-02f, 1.19232554e-02f, 1.16788635e-02f
 };
-// ========================================================
 
 
-// Utility ---------------------------------------------------------
+
 inline unsigned char to_gray_uc(unsigned char r, unsigned char g, unsigned char b) {
     float gray = 0.299f * r + 0.587f * g + 0.114f * b;
     int gi = static_cast<int>(gray + 0.5f);
@@ -61,13 +57,13 @@ inline unsigned char clamp_uc(float v) {
     if (iv > 255) iv = 255;
     return static_cast<unsigned char>(iv);
 }
-// ---------------------------------------------------------------
 
 
-// Perform grayscale (no halo exchange)
+
+
 void mpi_grayscale(const std::string &input_path, const std::string &output_path,
                    int rank, int size,
-                   ImageTiming& timing) // <-- Pass struct by ref
+                   ImageTiming& timing) 
 {
     int width=0, height=0, channels=3;
     unsigned char *full_img=nullptr;
@@ -82,10 +78,10 @@ void mpi_grayscale(const std::string &input_path, const std::string &output_path
         }
         channels = 3;
     }
-    t1 = MPI_Wtime(); // <-- End Load
+    t1 = MPI_Wtime(); 
     timing.load_ms = (t1-t0) * 1000.0;
 
-    // --- Start Process ---
+ 
     double t_proc_start = MPI_Wtime();
 
     MPI_Bcast(&width,1,MPI_INT,0,MPI_COMM_WORLD);
@@ -137,20 +133,19 @@ void mpi_grayscale(const std::string &input_path, const std::string &output_path
                 full_gray.data(),recvcounts.data(),displs2.data(),
                 MPI_UNSIGNED_CHAR,0,MPI_COMM_WORLD);
 
-    double t_proc_stop = MPI_Wtime(); // <-- End Process
+    double t_proc_stop = MPI_Wtime(); 
     timing.process_ms = (t_proc_stop - t_proc_start) * 1000.0;
 
-    // --- Start Export ---
+    
     double t_export_start = MPI_Wtime();
     if(rank==0){
         stbi_write_png(output_path.c_str(),width,height,1,full_gray.data(),width);
     }
-    double t_export_stop = MPI_Wtime(); // <-- End Export
+    double t_export_stop = MPI_Wtime(); 
     timing.export_ms = (t_export_stop - t_export_start) * 1000.0;
 }
 
-// ---------------------------------------------------------------
-// Perform Sobel edge detection (with halo exchange)
+
 void mpi_sobel(const std::string &input_path, const std::string &output_path,
                int rank, int size,
                ImageTiming& timing)
@@ -165,10 +160,9 @@ void mpi_sobel(const std::string &input_path, const std::string &output_path,
         if(!full_img){ std::cerr<<"Failed to load "<<input_path<<"\n"; MPI_Abort(MPI_COMM_WORLD,1); }
         channels = 3;
     }
-    t1 = MPI_Wtime(); // <-- End Load
+    t1 = MPI_Wtime(); 
     timing.load_ms = (t1-t0) * 1000.0;
 
-    // --- Start Process ---
     double t_proc_start = MPI_Wtime();
 
     MPI_Bcast(&width,1,MPI_INT,0,MPI_COMM_WORLD);
@@ -195,7 +189,7 @@ void mpi_sobel(const std::string &input_path, const std::string &output_path,
                  0,MPI_COMM_WORLD);
     if(rank==0) stbi_image_free(full_img);
 
-    // Convert to grayscale
+
     std::vector<unsigned char> local_gray(myrows*width);
     for(int y=0;y<myrows;y++)
         for(int x=0;x<width;x++){
@@ -203,7 +197,7 @@ void mpi_sobel(const std::string &input_path, const std::string &output_path,
             local_gray[y*width+x]=to_gray_uc(local_rgb[idx],local_rgb[idx+1],local_rgb[idx+2]);
         }
 
-    // Halo exchange (1 row up/down)
+
     std::vector<unsigned char> top(width), bottom(width);
     int above=(rank==0)?MPI_PROC_NULL:rank-1;
     int below=(rank==size-1)?MPI_PROC_NULL:rank+1;
@@ -215,9 +209,9 @@ void mpi_sobel(const std::string &input_path, const std::string &output_path,
                  bottom.data(),width,MPI_UNSIGNED_CHAR,below,0,
                  MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 
-    // Compute Sobel
+
     std::vector<unsigned char> local_edge(myrows*width);
-    const int R_SOBEL = 1; // 3/2
+    const int R_SOBEL = 1; 
 
     auto get_gray=[&](int y,int x)->unsigned char{
         if(y<0) return top[x];
@@ -238,7 +232,7 @@ void mpi_sobel(const std::string &input_path, const std::string &output_path,
         }
     }
 
-    // Gather results
+
     std::vector<int> recvcounts(size), displs2(size);
     if(rank==0){
         int off=0;
@@ -257,10 +251,10 @@ void mpi_sobel(const std::string &input_path, const std::string &output_path,
                 full_edge.data(),recvcounts.data(),displs2.data(),
                 MPI_UNSIGNED_CHAR,0,MPI_COMM_WORLD);
 
-    double t_proc_stop = MPI_Wtime(); // <-- End Process
+    double t_proc_stop = MPI_Wtime(); 
     timing.process_ms = (t_proc_stop - t_proc_start) * 1000.0;
 
-    // --- Start Export ---
+
     double t_export_start = MPI_Wtime();
     if(rank==0){
         stbi_write_png(output_path.c_str(),width,height,1,full_edge.data(),width);
@@ -269,14 +263,13 @@ void mpi_sobel(const std::string &input_path, const std::string &output_path,
     timing.export_ms = (t_export_stop - t_export_start) * 1000.0;
 }
 
-// ---------------------------------------------------------------
-// Perform Gaussian Blur (27x27)
+
 void mpi_gaussian(const std::string &input_path, const std::string &output_path,
                   int rank, int size,
                   ImageTiming& timing)
 {
-    const int R = GAUSSIAN_RADIUS; // 13
-    const int K = KERNEL_SIZE_GAUSSIAN; // 27
+    const int R = GAUSSIAN_RADIUS; // 4
+    const int K = KERNEL_SIZE_GAUSSIAN; // 9
 
     int width=0, height=0, channels=3;
     unsigned char *full_img=nullptr;
@@ -288,10 +281,9 @@ void mpi_gaussian(const std::string &input_path, const std::string &output_path,
         if(!full_img){ std::cerr<<"Failed to load "<<input_path<<"\n"; MPI_Abort(MPI_COMM_WORLD,1); }
         channels = 3;
     }
-    t1 = MPI_Wtime(); // <-- End Load
+    t1 = MPI_Wtime();
     timing.load_ms = (t1-t0) * 1000.0;
 
-    // --- Start Process ---
     double t_proc_start = MPI_Wtime();
 
     MPI_Bcast(&width,1,MPI_INT,0,MPI_COMM_WORLD);
@@ -319,7 +311,7 @@ void mpi_gaussian(const std::string &input_path, const std::string &output_path,
     if(rank==0) stbi_image_free(full_img);
 
 
-    // Halo exchange (R rows * width * 3 channels)
+ 
     std::vector<unsigned char> top(width*channels*R), bottom(width*channels*R);
     int above=(rank==0)?MPI_PROC_NULL:rank-1;
     int below=(rank==size-1)?MPI_PROC_NULL:rank+1;
@@ -331,7 +323,6 @@ void mpi_gaussian(const std::string &input_path, const std::string &output_path,
                  bottom.data(),width*channels*R,MPI_UNSIGNED_CHAR,below,0,
                  MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 
-    // Apply Gaussian 27x27 per channel
     std::vector<unsigned char> local_blur(myrows*width*channels);
 
     auto get_rgb=[&](int y,int x,int c)->unsigned char{
@@ -375,19 +366,18 @@ void mpi_gaussian(const std::string &input_path, const std::string &output_path,
                 full_blur.data(),recvcounts.data(),displs2.data(),
                 MPI_UNSIGNED_CHAR,0,MPI_COMM_WORLD);
 
-    double t_proc_stop = MPI_Wtime(); // <-- End Process
+    double t_proc_stop = MPI_Wtime();
     timing.process_ms = (t_proc_stop - t_proc_start) * 1000.0;
 
-    // --- Start Export ---
     double t_export_start = MPI_Wtime();
     if(rank==0){
         stbi_write_png(output_path.c_str(),width,height,channels,full_blur.data(),width*channels);
     }
-    double t_export_stop = MPI_Wtime(); // <-- End Export
+    double t_export_stop = MPI_Wtime();
     timing.export_ms = (t_export_stop - t_export_start) * 1000.0;
 }
 
-// ------------------------------------------------------
+
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
     int rank, size;
@@ -406,7 +396,7 @@ int main(int argc, char** argv) {
     std::string output_dir = argv[2];
     std::string operation = argv[3];
 
-    // Collect input images
+  
     std::vector<std::string> images;
     if (rank == 0) {
         std::cout << "Performing '" << operation << "' on images in " << input_dir
@@ -424,7 +414,7 @@ int main(int argc, char** argv) {
         std::cout << "Found " << images.size() << " image(s).\n";
     }
 
-    // Broadcast image count
+    
     int image_count = images.size();
     MPI_Bcast(&image_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -432,7 +422,7 @@ int main(int argc, char** argv) {
         images.resize(image_count);
     }
 
-    // Broadcast all image paths
+   
     for (int i = 0; i < image_count; ++i) {
         int path_len = 0;
         if (rank == 0) {
@@ -454,7 +444,7 @@ int main(int argc, char** argv) {
     std::vector<ImageTiming> timings;
     double total_load = 0.0, total_process = 0.0, total_export = 0.0;
 
-    // Each rank processes all images (the functions inside handle data distribution)
+   
     for (auto &infile : images) {
         if(rank == 0) {
              std::cout << "Processing " << infile << "...\n";
@@ -475,7 +465,7 @@ int main(int argc, char** argv) {
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 
-        // Only rank 0 has timing data, add it to totals
+
         if (rank == 0) {
             timings.push_back(timing);
             total_load += timing.load_ms;
@@ -483,10 +473,9 @@ int main(int argc, char** argv) {
             total_export += timing.export_ms;
         }
 
-        MPI_Barrier(MPI_COMM_WORLD); // Sync before starting next image
+        MPI_Barrier(MPI_COMM_WORLD); 
     }
 
-    // ---------------- Write JSON Output -----------------
     if (rank == 0) {
         std::ofstream jf(output_dir + "/timings.json");
         jf << std::fixed << std::setprecision(4);

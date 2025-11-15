@@ -7,9 +7,9 @@
 #include <sstream>
 #include <cmath>
 #include <algorithm>
-#include <iomanip> // For std::setprecision
+#include <iomanip> 
 
-// STB Image libraries
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image.h"
@@ -18,7 +18,7 @@
 
 namespace fs = std::filesystem;
 
-// Image struct with timers and JSON name helper
+
 struct Image {
     std::string name, ext;
     int width, height, channels_in;
@@ -42,14 +42,11 @@ struct Image {
     }
 };
 
-// ==================== KERNEL DEFINITIONS ====================
-// (Paste your 27x27 GAUSSIAN_27x27 and 3x3 sobel kernels here)
+
 const float GAUSSIAN_27x27[729] = { /* ... your 729 values ... */ 0.00000102f };
 const float sobel_x[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
 const float sobel_y[9] = {-1, -2, -1, 0, 0, 0, 1, 2, 1};
-// ========================================================
 
-// ==================== CPU FILTER FUNCTIONS (SINGLE-THREADED) ====================
 inline int clamp(int val, int min_val, int max_val) {
     return std::min(std::max(val, min_val), max_val);
 }
@@ -114,11 +111,11 @@ void apply_sobel(const unsigned char* in, unsigned char* out, int w, int h, int 
         }
     }
 }
-// ========================================================
+
 
 int main(int argc, char** argv)
 {
-    // --- 1. Argument and Folder Setup ---
+
     if (argc < 4) {
         std::cerr << "Usage: ./ProjectCode_ST <input_folder> <output_folder> <operation>\n";
         std::cerr << "Operations: grayscale | gaussian | sobel\n";
@@ -141,7 +138,6 @@ int main(int argc, char** argv)
 
     std::vector<Image> images;
 
-    // --- 2. Load all images from host memory (with timing) ---
     for (const auto& entry : fs::directory_iterator(folder)) {
         if (!entry.is_regular_file()) continue;
         Image img;
@@ -167,7 +163,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // --- 5. Process all images (with per-image timing) ---
+  
     for (auto& img : images) {
         auto cpu_start = std::chrono::high_resolution_clock::now();
         if (op == "grayscale") {
@@ -183,7 +179,7 @@ int main(int argc, char** argv)
         img.time_process_ms = std::chrono::duration<float, std::milli>(cpu_stop - cpu_start).count();
     }
 
-    // --- 6. Save all outputs to disk (SERIAL) ---
+    
     for (auto& img : images) {
         std::string outPath = (fs::path(output_folder) / (img.name + "_" + op + ".png")).string();
         int stride = img.width * img.channels_out;
@@ -198,7 +194,6 @@ int main(int argc, char** argv)
         img.output_host = nullptr;
     }
 
-    // --- 7. Calculate Totals and Print JSON to stdout ---
     float total_load_ms = 0.0f;
     float total_process_ms = 0.0f;
     float total_export_ms = 0.0f;
@@ -229,9 +224,8 @@ int main(int argc, char** argv)
     std::cout << "  ]\n";
     std::cout << "}\n";
 
-    // Create file path for JSON
     std::string json_path = (fs::path(output_folder) / "timings.json").string();
-    std::ofstream json_file(json_path); // <-- Create file stream
+    std::ofstream json_file(json_path); 
 
     json_file << std::fixed << std::setprecision(4);
     json_file << "{\n";
@@ -252,7 +246,7 @@ int main(int argc, char** argv)
 
     json_file << "  ]\n";
     json_file << "}\n";
-    json_file.close(); // <-- Close the file
+    json_file.close(); 
 
     return 0;
 }

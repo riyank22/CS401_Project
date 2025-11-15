@@ -9,7 +9,7 @@
 #include <cmath>
 #include <algorithm>
 #include <omp.h>
-#include <iomanip> // For std::setprecision
+#include <iomanip> 
 #include <fstream>
 
 // STB Image libraries
@@ -20,7 +20,7 @@
 
 namespace fs = std::filesystem;
 
-// Image struct with timers and JSON name helper
+
 struct Image {
     std::string name, ext;
     int width, height, channels_in;
@@ -44,7 +44,7 @@ struct Image {
     }
 };
 
-// ==================== KERNEL DEFINITIONS ====================
+
 // (Paste your 27x27 GAUSSIAN_27x27 and 3x3 sobel kernels here)
 const float GAUSSIAN_9x9[81] = {
     1.16788635e-02f, 1.19232554e-02f, 1.21009460e-02f, 1.22088289e-02f, 1.22450031e-02f, 1.22088289e-02f, 1.21009460e-02f, 1.19232554e-02f, 1.16788635e-02f,
@@ -59,9 +59,7 @@ const float GAUSSIAN_9x9[81] = {
 };
 const float sobel_x[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
 const float sobel_y[9] = {-1, -2, -1, 0, 0, 0, 1, 2, 1};
-// ========================================================
 
-// ==================== CPU FILTER FUNCTIONS (OMP) ====================
 inline int clamp(int val, int min_val, int max_val) {
     return std::min(std::max(val, min_val), max_val);
 }
@@ -119,13 +117,13 @@ void apply_sobel_on_gray(const unsigned char* in_gray, unsigned char* out, int w
                     int nx = clamp(x + kx, 0, w - 1);
                     int ny = clamp(y + ky, 0, h - 1);
 
-                    // Get the 1-channel index
+                 
                     int idx = ny * w + nx;
 
-                    // Read the pre-converted gray value
+                    
                     float gray_val = (float)in_gray[idx];
 
-                    // Apply kernel
+           
                     gx += gray_val * kx_kernel[(ky + half) * k_size + (kx + half)];
                     gy += gray_val * ky_kernel[(ky + half) * k_size + (kx + half)];
                 }
@@ -135,11 +133,11 @@ void apply_sobel_on_gray(const unsigned char* in_gray, unsigned char* out, int w
         }
     }
 }
-// ========================================================
+
 
 int main(int argc, char** argv)
 {
-    // --- 1. Argument and Folder Setup ---
+ 
     if (argc < 4) {
         std::cerr << "Usage: ./ProjectCode_OMP <input_folder> <output_folder> <operation>\n";
         std::cerr << "Operations: grayscale | gaussian | sobel\n";
@@ -162,7 +160,7 @@ int main(int argc, char** argv)
 
     std::vector<Image> images;
 
-    // --- 2. Load all images from host memory (with timing) ---
+
     for (const auto& entry : fs::directory_iterator(folder)) {
         if (!entry.is_regular_file()) continue;
         Image img;
@@ -188,7 +186,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // --- 5. Process all images (with per-image timing) ---
+
     for (auto& img : images) {
         auto cpu_start = std::chrono::high_resolution_clock::now();
         if (op == "grayscale") {
@@ -198,26 +196,22 @@ int main(int argc, char** argv)
                            GAUSSIAN_9x9, KERNEL_SIZE_GAUSSIAN);
         }
         else if (op == "sobel") {
-            // STEP 1: Allocate a temporary buffer for the grayscale image.
-            // img.channels_out is already 1, which is correct.
+
             size_t gray_size = (size_t)img.width * img.height * 1;
             unsigned char* gray_buffer = new unsigned char[gray_size];
-
-            // STEP 2: Convert the 3-channel input to 1-channel grayscale.
             apply_grayscale(img.input_host, gray_buffer, img.width, img.height, img.channels_in);
 
             // STEP 3: Apply Sobel to the 1-channel grayscale buffer.
             apply_sobel_on_gray(gray_buffer, img.output_host, img.width, img.height,
                                 sobel_x, sobel_y, KERNEL_SIZE_SOBEL);
 
-            // STEP 4: Clean up the temporary buffer.
             delete[] gray_buffer;
         }
         auto cpu_stop = std::chrono::high_resolution_clock::now();
         img.time_process_ms = std::chrono::duration<float, std::milli>(cpu_stop - cpu_start).count();
     }
 
-    // --- 6. Save all outputs to disk (MULTITHREADED) ---
+
     std::vector<std::thread> save_threads;
     for (auto& img : images) {
         save_threads.emplace_back([&img, output_folder, op]() {
@@ -236,7 +230,7 @@ int main(int argc, char** argv)
     }
     for (auto& t : save_threads) { t.join(); }
 
-    // --- 7. Calculate Totals and Print JSON to stdout ---
+
     float total_load_ms = 0.0f;
     float total_process_ms = 0.0f;
     float total_export_ms = 0.0f;
@@ -267,9 +261,9 @@ int main(int argc, char** argv)
     std::cout << "  ]\n";
     std::cout << "}\n";
 
-    // Create file path for JSON
+
     std::string json_path = (fs::path(output_folder) / "timings.json").string();
-    std::ofstream json_file(json_path); // <-- Create file stream
+    std::ofstream json_file(json_path); 
 
     json_file << std::fixed << std::setprecision(4);
     json_file << "{\n";
@@ -290,7 +284,7 @@ int main(int argc, char** argv)
 
     json_file << "  ]\n";
     json_file << "}\n";
-    json_file.close(); // <-- Close the file
+    json_file.close();
 
     return 0;
 }
