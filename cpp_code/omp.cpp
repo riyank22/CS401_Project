@@ -107,8 +107,8 @@ void apply_gaussian(const unsigned char* in, unsigned char* out, int w, int h, i
     }
 }
 
-void apply_sobel(const unsigned char* in, unsigned char* out, int w, int h, int c_in,
-                 const float* kx_kernel, const float* ky_kernel, int k_size) {
+void apply_sobel_on_gray(const unsigned char* in_gray, unsigned char* out, int w, int h,
+                         const float* kx_kernel, const float* ky_kernel, int k_size) {
     int half = k_size / 2;
     #pragma omp parallel for
     for (int y = 0; y < h; ++y) {
@@ -118,10 +118,16 @@ void apply_sobel(const unsigned char* in, unsigned char* out, int w, int h, int 
                 for (int kx = -half; kx <= half; ++kx) {
                     int nx = clamp(x + kx, 0, w - 1);
                     int ny = clamp(y + ky, 0, h - 1);
-                    int idx = (ny * w + nx) * c_in;
-                    float gray = 0.299f * in[idx] + 0.587f * in[idx + 1] + 0.114f * in[idx + 2];
-                    gx += gray * kx_kernel[(ky + half) * k_size + (kx + half)];
-                    gy += gray * ky_kernel[(ky + half) * k_size + (kx + half)];
+
+                    // Get the 1-channel index
+                    int idx = ny * w + nx;
+
+                    // Read the pre-converted gray value
+                    float gray_val = (float)in_gray[idx];
+
+                    // Apply kernel
+                    gx += gray_val * kx_kernel[(ky + half) * k_size + (kx + half)];
+                    gy += gray_val * ky_kernel[(ky + half) * k_size + (kx + half)];
                 }
             }
             float mag = std::sqrt(gx * gx + gy * gy);
@@ -190,9 +196,22 @@ int main(int argc, char** argv)
         } else if (op == "gaussian") {
             apply_gaussian(img.input_host, img.output_host, img.width, img.height, img.channels_in,
                            GAUSSIAN_9x9, KERNEL_SIZE_GAUSSIAN);
-        } else if (op == "sobel") {
-            apply_sobel(img.input_host, img.output_host, img.width, img.height, img.channels_in,
-                        sobel_x, sobel_y, KERNEL_SIZE_SOBEL);
+        }
+        else if (op == "sobel") {
+            // STEP 1: Allocate a temporary buffer for the grayscale image.
+            // img.channels_out is already 1, which is correct.
+            size_t gray_size = (size_t)img.width * img.height * 1;
+            unsigned char* gray_buffer = new unsigned char[gray_size];
+
+            // STEP 2: Convert the 3-channel input to 1-channel grayscale.
+            apply_grayscale(img.input_host, gray_buffer, img.width, img.height, img.channels_in);
+
+            // STEP 3: Apply Sobel to the 1-channel grayscale buffer.
+            apply_sobel_on_gray(gray_buffer, img.output_host, img.width, img.height,
+                                sobel_x, sobel_y, KERNEL_SIZE_SOBEL);
+
+            // STEP 4: Clean up the temporary buffer.
+            delete[] gray_buffer;
         }
         auto cpu_stop = std::chrono::high_resolution_clock::now();
         img.time_process_ms = std::chrono::duration<float, std::milli>(cpu_stop - cpu_start).count();
