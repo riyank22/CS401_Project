@@ -9,29 +9,26 @@ const cors = require('cors');
 
 const app = express();
 const port = process.env.PORT || 3001;
-const upload = multer({ dest: 'uploads/' }); // Temp storage for uploads
+const upload = multer({ dest: 'uploads/' }); 
 
-// --- File Path Configuration ---
+
 const publicDir = path.join(__dirname, 'public');
 const jobsDir = path.join(publicDir, 'jobs');
 const binDir = path.join(__dirname, 'bin');
 
-// --- Middleware ---
-app.use(cors()); // Allow cross-origin requests
-app.use(express.json()); // Parse JSON bodies
 
-// Ensure required directories exist
+app.use(cors()); 
+app.use(express.json()); 
+
 fs.ensureDirSync(jobsDir);
 fs.ensureDirSync(binDir);
 
-// =============================================================================
-//   2. BACKEND: HELPER FUNCTIONS
-// =============================================================================
+
 
 /**
  * Safely reads and updates the status.json file for a job.
- * @param {string} jobId - The ID of the job.
- * @param {object} updates - An object with keys/values to merge into the status.
+ * @param {string} jobId 
+ * @param {object} updates 
  */
 async function updateStatus(jobId, updates) {
   const statusPath = path.join(jobsDir, jobId, 'status.json');
@@ -107,27 +104,27 @@ async function runFullBenchmarkSequentially(jobId, filterType) {
     await runExecutable(jobId, 'GPU', inputDir, cudaOutDir, filterType); // Changed from 'filter_cuda'
     await updateStatus(jobId, { cuda: 'completed' });
 
-    // 2. OpenMP
+ 
     currentStep = 'openmp';
     const openmpOutDir = path.join(jobDir, 'output_openmp');
     await updateStatus(jobId, { status: 'processing_openmp', openmp: 'processing' });
     await runExecutable(jobId, 'OMP', inputDir, openmpOutDir, filterType); // Changed from 'filter_openmp'
     await updateStatus(jobId, { openmp: 'completed' });
 
-    // 3. MPI (using GPU executable as requested)
+  
     currentStep = 'mpi';
     const mpiOutDir = path.join(jobDir, 'output_mpi');
     await updateStatus(jobId, { status: 'processing_mpi', mpi: 'processing' });
     await runMPI(jobId, 'MPI', inputDir, mpiOutDir, filterType); // Changed from 'filter_mpi'
     await updateStatus(jobId, { mpi: 'completed' });
 
-    // 4. All Done
+ 
     await updateStatus(jobId, { status: 'completed' });
     console.log(`[Job ${jobId}] Benchmark completed successfully.`);
 
   } catch (error) {
     console.error(`[Job ${jobId}] Benchmark FAILED at step '${currentStep}':`, error);
-    // Mark the failing step and stop the job
+
     await updateStatus(jobId, {
       status: 'failed',
       [currentStep]: 'failed',
@@ -151,7 +148,7 @@ async function getEngineData(engineName, status, jobDir, batchSize) {
   try {
     const timingsPath = path.join(jobDir, `output_${engineName}`, 'timings.json');
     const timings = await fs.readJson(timingsPath);
-    // Tweak 2: Return the timings object directly without creating a summary.
+  
     return timings;
   } catch (error) {
     console.error(`Could not read timings for ${engineName}:`, error);
@@ -159,23 +156,19 @@ async function getEngineData(engineName, status, jobDir, batchSize) {
   }
 }
 
-/**
- * The main "smart" handler for GET /result and GET /previous.
- * Gathers all available data for a job and builds the response.
- */
+
 async function getJobResultHandler(req, res) {
   const { job_id } = req.params;
   const jobDir = path.join(jobsDir, job_id);
 
   try {
-    // 1. Get Status
+ 
     const statusPath = path.join(jobDir, 'status.json');
     if (!await fs.pathExists(statusPath)) {
       return res.status(404).json({ error: 'Job not found' });
     }
     const status = await fs.readJson(statusPath);
 
-    // 2. Get Input Images
     const inputDir = path.join(jobDir, 'input');
     let inputImages = [];
     let batchSize = 0;
@@ -186,14 +179,13 @@ async function getJobResultHandler(req, res) {
       const filenames = await fs.readdir(inputDir);
       for (const filename of filenames) {
         const imgPath = path.join(inputDir, filename);
-        // const dimensions = sizeOf(imgPath);
+ 
         
-        // Tweak 4: Add conditional output URLs
+    
         const imageObject = {
           filename: filename,
           url: `/public/jobs/${job_id}/input/${filename}`,
-        //   width: dimensions.width,
-        //   height: dimensions.height,
+    
         };
 
         const parsed = path.parse(filename);
@@ -217,14 +209,14 @@ async function getJobResultHandler(req, res) {
       console.warn(`[Job ${job_id}] Could not read input images:`, e.message);
     }
 
-    // 3. Conditionally get results for each engine
+
     const [cudaData, openmpData, mpiData] = await Promise.all([
       getEngineData('cuda', status, jobDir, batchSize),
       getEngineData('openmp', status, jobDir, batchSize),
       getEngineData('mpi', status, jobDir, batchSize)
     ]);
 
-    // 4. Assemble final response
+    
     const response = {
       job_id: job_id,
       status_details: status,
@@ -253,7 +245,7 @@ async function getJobResultList(req, res)
         const stat = await fs.stat(fullPath);
         if (stat.isDirectory() && name.startsWith('job_')) jobIds.push(name);
       } catch (e) {
-        // ignore unreadable entries
+        
       }
     }
     res.json({ jobs: jobIds });
@@ -263,17 +255,7 @@ async function getJobResultList(req, res)
   }
 }
 
-// =============================================================================
-//   3. BACKEND: API ENDPOINTS
-// =============================================================================
 
-/**
- * ENDPOINT 1: Submit Job
- * - Accepts multipart/form-data with 'files' and 'filter_type'.
- * - Creates job structure.
- * - Starts background processing.
- * - Responds 202 Accepted.
- */
 app.post('/api/jobs/submit', upload.array('files'), async (req, res) => {
   const { filter_type } = req.body;
   const files = req.files;
@@ -290,18 +272,18 @@ app.post('/api/jobs/submit', upload.array('files'), async (req, res) => {
   const inputDir = path.join(jobDir, 'input');
 
   try {
-    // 1. Create directory structure
+
     await fs.ensureDir(inputDir);
     await fs.ensureDir(path.join(jobDir, 'output_cuda'));
     await fs.ensureDir(path.join(jobDir, 'output_openmp'));
     await fs.ensureDir(path.join(jobDir, 'output_mpi'));
 
-    // 2. Move uploaded files to input directory
+
     for (const file of files) {
       await fs.move(file.path, path.join(inputDir, file.originalname));
     }
 
-    // 3. Create initial status.json
+
     const initialState = {
       job_id: jobId,
       operation: filter_type,
@@ -314,24 +296,20 @@ app.post('/api/jobs/submit', upload.array('files'), async (req, res) => {
     };
     await fs.writeJson(path.join(jobDir, 'status.json'), initialState, { spaces: 2 });
 
-    // 4. Start background task (DO NOT await)
+  
     runFullBenchmarkSequentially(jobId, filter_type);
 
-    // 5. Respond 202 Accepted
+  
     res.status(202).json(initialState);
 
   } catch (error) {
     console.error(`[Job ${jobId}] Failed to submit job:`, error);
     res.status(500).json({ error: 'Job submission failed.' });
-    // Cleanup failed job directory
+ 
     await fs.remove(jobDir);
   }
 });
 
-/**
- * ENDPOINT 2: Get Job Status (Polling)
- * - Reads and returns the status.json file.
- */
 app.get('/api/jobs/status/:job_id', async (req, res) => {
     const { job_id } = req.params;
     const statusPath = path.join(jobsDir, job_id, 'status.json');
@@ -374,12 +352,11 @@ async function getJobResultList(req, res)
           jobs.push({ job_id: name, error: 'status.json missing' });
         }
       } catch (e) {
-        // ignore unreadable entries
+    
       }
     }
 
-    // Sort so the lastly processed job appears first.
-    // Uses `last_updated` (descending) with fallback to `submitted_at`.
+  
     jobs.sort((a, b) => {
       const aTime = Date.parse(a.last_updated) || Date.parse(a.submitted_at) || 0;
       const bTime = Date.parse(b.last_updated) || Date.parse(b.submitted_at) || 0;
@@ -393,25 +370,15 @@ async function getJobResultList(req, res)
   }
 }
 
-/**
- * ENDPOINT 3: Get Job Results (Main Data)
- * - Calls the "smart" handler.
- */
+
 app.get('/api/jobs/result/:job_id', getJobResultHandler);
 
-/**
- * ENDPOINT 4: Get Previous Job (Alias)
- * - Calls the "smart" handler.
- */
+
 app.get('/api/jobs/list', getJobResultList);
 
-// =============================================================================
-//   4. START THE SERVER
-// =============================================================================
 
 app.use('/public', express.static(publicDir)); // Serve static files
 
-// Serve the SPA entrypoint
 app.use((req, res) => {
     const indexPath = path.join(publicDir, 'index.html');
     if (!fs.existsSync(indexPath)) {
