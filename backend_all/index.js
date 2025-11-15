@@ -72,7 +72,7 @@ function runExecutable(jobId, exeName, inputDir, outputDir, filterType) {
 
 function runMPI(jobId, exeName, inputDir, outputDir, filterType) {
       const exePath = path.join(binDir, exeName);
-      const args = ['--use-hwthread-cpus','-n', '8', exePath, inputDir, outputDir, filterType];
+      const args = ['-n', '4', exePath, inputDir, outputDir, filterType];
 
       console.log(`[Job ${jobId}] Running: mpirun ${args.slice(0,2).join(' ')} ${exePath} ${[inputDir, outputDir, filterType].join(' ')}`);
 
