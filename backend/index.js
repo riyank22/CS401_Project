@@ -1,0 +1,398 @@
+const express = require('express');
+const multer = require('multer');
+const fs = require('fs-extra');
+const path = require('path');
+const { execFile } = require('child_process');
+const { v4: uuidv4 } = require('uuid');
+const sizeOf = require('image-size');
+const cors = require('cors');
+
+const app = express();
+const port = process.env.PORT || 3001;
+const upload = multer({ dest: 'uploads/' }); 
+
+
+const publicDir = path.join(__dirname, 'public');
+const jobsDir = path.join(publicDir, 'jobs');
+const binDir = path.join(__dirname, 'bin');
+
+
+app.use(cors()); 
+app.use(express.json()); 
+
+fs.ensureDirSync(jobsDir);
+fs.ensureDirSync(binDir);
+
+
+
+/**
+ * Safely reads and updates the status.json file for a job.
+ * @param {string} jobId 
+ * @param {object} updates 
+ */
+async function updateStatus(jobId, updates) {
+  const statusPath = path.join(jobsDir, jobId, 'status.json');
+  try {
+    const status = await fs.readJson(statusPath);
+    const newStatus = { ...status, ...updates, last_updated: new Date().toISOString() };
+    await fs.writeJson(statusPath, newStatus, { spaces: 2 });
+    return newStatus;
+  } catch (error) {
+    console.error(`[Job ${jobId}] Failed to update status:`, error);
+  }
+}
+
+/**
+ * Runs a C++ executable and returns a promise.
+ * @param {string} exeName - Name of the binary (e.g., 'filter_cuda').
+ * @param {string} inputDir - Full path to the input directory.
+ * @param {string} outputDir - Full path to the output directory.
+ * @param {string} filterType - The filter name (e.g., 'grayscale').
+ */
+function runExecutable(jobId, exeName, inputDir, outputDir, filterType) {
+  const exePath = path.join(binDir, exeName);
+  const args = [inputDir, outputDir, filterType];
+
+  console.log(`[Job ${jobId}] Running: ${exePath} ${args.join(' ')}`);
+
+  return new Promise((resolve, reject) => {
+    execFile(exePath, args, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`[Job ${jobId}] Executable Error (${exeName}):`, stderr);
+        return reject(new Error(`Error running ${exeName}: ${stderr || error.message}`));
+      }
+      console.log(`[Job ${jobId}] Executable Output (${exeName}):`, stdout);
+      resolve(stdout);
+    });
+  });
+}
+
+function runMPI(jobId, exeName, inputDir, outputDir, filterType) {
+      const exePath = path.join(binDir, exeName);
+      const args = ['-n', '4', exePath, inputDir, outputDir, filterType];
+
+      console.log(`[Job ${jobId}] Running: mpirun ${args.slice(0,2).join(' ')} ${exePath} ${[inputDir, outputDir, filterType].join(' ')}`);
+
+      return new Promise((resolve, reject) => {
+        execFile('mpirun', args, (error, stdout, stderr) => {
+          if (error) {
+            console.error(`[Job ${jobId}] Executable Error (${exeName}):`, stderr);
+            return reject(new Error(`Error running MPI (${exeName}): ${stderr || error.message}`));
+          }
+          console.log(`[Job ${jobId}] Executable Output (${exeName}):`, stdout);
+          resolve(stdout);
+        });
+      });
+    }
+
+/**
+ * The main asynchronous background task for running the sequential benchmark.
+ * This is "fire-and-forget" from the /submit endpoint.
+ * @param {string} jobId - The ID of the job to process.
+ * @param {string} filterType - The filter name.
+ */
+async function runFullBenchmarkSequentially(jobId, filterType) {
+  const jobDir = path.join(jobsDir, jobId);
+  const inputDir = path.join(jobDir, 'input');
+  let currentStep = '';
+
+  try {
+    // 1. CUDA
+    currentStep = 'cuda';
+    const cudaOutDir = path.join(jobDir, 'output_cuda');
+    await updateStatus(jobId, { status: 'processing_cuda', cuda: 'processing' });
+    await runExecutable(jobId, 'GPU', inputDir, cudaOutDir, filterType); // Changed from 'filter_cuda'
+    await updateStatus(jobId, { cuda: 'completed' });
+
+ 
+    currentStep = 'openmp';
+    const openmpOutDir = path.join(jobDir, 'output_openmp');
+    await updateStatus(jobId, { status: 'processing_openmp', openmp: 'processing' });
+    await runExecutable(jobId, 'OMP', inputDir, openmpOutDir, filterType); // Changed from 'filter_openmp'
+    await updateStatus(jobId, { openmp: 'completed' });
+
+  
+    currentStep = 'mpi';
+    const mpiOutDir = path.join(jobDir, 'output_mpi');
+    await updateStatus(jobId, { status: 'processing_mpi', mpi: 'processing' });
+    await runMPI(jobId, 'MPI', inputDir, mpiOutDir, filterType); // Changed from 'filter_mpi'
+    await updateStatus(jobId, { mpi: 'completed' });
+
+ 
+    await updateStatus(jobId, { status: 'completed' });
+    console.log(`[Job ${jobId}] Benchmark completed successfully.`);
+
+  } catch (error) {
+    console.error(`[Job ${jobId}] Benchmark FAILED at step '${currentStep}':`, error);
+
+    await updateStatus(jobId, {
+      status: 'failed',
+      [currentStep]: 'failed',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Helper to read an engine's result data if it's completed.
+ * @param {string} engineName - 'cuda', 'openmp', or 'mpi'.
+ * @param {object} status - The job's status object.
+ * @param {string} jobDir - Full path to the job directory.
+ * @param {number} batchSize - Number of images, for calculating averages.
+ * @returns {object | null} - The data object or null.
+ */
+async function getEngineData(engineName, status, jobDir, batchSize) {
+  if (status[engineName] !== 'completed') {
+    return null;
+  }
+  try {
+    const timingsPath = path.join(jobDir, `output_${engineName}`, 'timings.json');
+    const timings = await fs.readJson(timingsPath);
+  
+    return timings;
+  } catch (error) {
+    console.error(`Could not read timings for ${engineName}:`, error);
+    return { error: 'Could not read timings.json' };
+  }
+}
+
+
+async function getJobResultHandler(req, res) {
+  const { job_id } = req.params;
+  const jobDir = path.join(jobsDir, job_id);
+
+  try {
+ 
+    const statusPath = path.join(jobDir, 'status.json');
+    if (!await fs.pathExists(statusPath)) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    const status = await fs.readJson(statusPath);
+
+    const inputDir = path.join(jobDir, 'input');
+    let inputImages = [];
+    let batchSize = 0;
+
+    const operation = status.operation || status.filter_type;
+
+    try {
+      const filenames = await fs.readdir(inputDir);
+      for (const filename of filenames) {
+        const imgPath = path.join(inputDir, filename);
+ 
+        
+    
+        const imageObject = {
+          filename: filename,
+          url: `/public/jobs/${job_id}/input/${filename}`,
+    
+        };
+
+        const parsed = path.parse(filename);
+        const baseName = parsed.name;
+        const outFilename = `${baseName}_${operation}.png`;
+
+        if (status.cuda === 'completed') {
+          imageObject.cuda_output_url = `/public/jobs/${job_id}/output_cuda/${outFilename}`;
+        }
+        if (status.openmp === 'completed') {
+          imageObject.openmp_output_url = `/public/jobs/${job_id}/output_openmp/${outFilename}`;
+        }
+        if (status.mpi === 'completed') {
+          imageObject.mpi_output_url = `/public/jobs/${job_id}/output_mpi/${outFilename}`;
+        }
+
+        inputImages.push(imageObject);
+      }
+      batchSize = inputImages.length;
+    } catch (e) {
+      console.warn(`[Job ${job_id}] Could not read input images:`, e.message);
+    }
+
+
+    const [cudaData, openmpData, mpiData] = await Promise.all([
+      getEngineData('cuda', status, jobDir, batchSize),
+      getEngineData('openmp', status, jobDir, batchSize),
+      getEngineData('mpi', status, jobDir, batchSize)
+    ]);
+
+    
+    const response = {
+      job_id: job_id,
+      status_details: status,
+      input_images: inputImages,
+      batch_size: batchSize,
+      cuda_data: cudaData,
+      openmp_data: openmpData,
+      mpi_data: mpiData,
+    };
+
+    res.json(response);
+  } catch (error) {
+    console.error(`[Job ${job_id}] Error in getJobResultHandler:`, error);
+    res.status(500).json({ error: 'Failed to retrieve job results' });
+  }
+}
+
+async function getJobResultList(req, res)
+{
+  try {
+    const entries = await fs.readdir(jobsDir);
+    const jobIds = [];
+    for (const name of entries) {
+      const fullPath = path.join(jobsDir, name);
+      try {
+        const stat = await fs.stat(fullPath);
+        if (stat.isDirectory() && name.startsWith('job_')) jobIds.push(name);
+      } catch (e) {
+        
+      }
+    }
+    res.json({ jobs: jobIds });
+  } catch (error) {
+    console.error('Failed to list jobs:', error);
+    res.status(500).json({ error: 'Failed to list jobs' });
+  }
+}
+
+
+app.post('/api/jobs/submit', upload.array('files'), async (req, res) => {
+  const { filter_type } = req.body;
+  const files = req.files;
+
+  if (!files || files.length === 0) {
+    return res.status(400).json({ error: 'No files uploaded.' });
+  }
+  if (!filter_type) {
+    return res.status(400).json({ error: 'No filter_type specified.' });
+  }
+
+  const jobId = `job_${uuidv4()}`;
+  const jobDir = path.join(jobsDir, jobId);
+  const inputDir = path.join(jobDir, 'input');
+
+  try {
+
+    await fs.ensureDir(inputDir);
+    await fs.ensureDir(path.join(jobDir, 'output_cuda'));
+    await fs.ensureDir(path.join(jobDir, 'output_openmp'));
+    await fs.ensureDir(path.join(jobDir, 'output_mpi'));
+
+
+    for (const file of files) {
+      await fs.move(file.path, path.join(inputDir, file.originalname));
+    }
+
+
+    const initialState = {
+      job_id: jobId,
+      operation: filter_type,
+      status: 'pending',
+      cuda: 'pending',
+      openmp: 'pending',
+      mpi: 'pending',
+      submitted_at: new Date().toISOString(),
+      batch_size: files.length,
+    };
+    await fs.writeJson(path.join(jobDir, 'status.json'), initialState, { spaces: 2 });
+
+  
+    runFullBenchmarkSequentially(jobId, filter_type);
+
+  
+    res.status(202).json(initialState);
+
+  } catch (error) {
+    console.error(`[Job ${jobId}] Failed to submit job:`, error);
+    res.status(500).json({ error: 'Job submission failed.' });
+ 
+    await fs.remove(jobDir);
+  }
+});
+
+app.get('/api/jobs/status/:job_id', async (req, res) => {
+    const { job_id } = req.params;
+    const statusPath = path.join(jobsDir, job_id, 'status.json');
+
+    try {
+        const status = await fs.readJson(statusPath);
+        res.json(status);
+    } catch (error) {
+        res.status(404).json({ error: 'Job not found or status file unreadable.' });
+    }
+});
+
+
+async function getJobResultList(req, res)
+{
+  try {
+    const entries = await fs.readdir(jobsDir);
+    const jobs = [];
+    for (const name of entries) {
+      const fullPath = path.join(jobsDir, name);
+      try {
+        const stat = await fs.stat(fullPath);
+        if (!stat.isDirectory() || !name.startsWith('job_')) continue;
+
+        const statusPath = path.join(fullPath, 'status.json');
+        if (await fs.pathExists(statusPath)) {
+          try {
+            const status = await fs.readJson(statusPath);
+            jobs.push({
+              job_id: name,
+              status: status.status || null,
+              operation: status.operation || status.filter_type || null,
+              batch_size: typeof status.batch_size !== 'undefined' ? status.batch_size : null,
+              last_updated: status.last_updated || null
+            });
+          } catch (e) {
+            jobs.push({ job_id: name, error: 'status.json unreadable' });
+          }
+        } else {
+          jobs.push({ job_id: name, error: 'status.json missing' });
+        }
+      } catch (e) {
+    
+      }
+    }
+
+  
+    jobs.sort((a, b) => {
+      const aTime = Date.parse(a.last_updated) || Date.parse(a.submitted_at) || 0;
+      const bTime = Date.parse(b.last_updated) || Date.parse(b.submitted_at) || 0;
+      return bTime - aTime;
+    });
+
+    res.json({ jobs });
+  } catch (error) {
+    console.error('Failed to list jobs:', error);
+    res.status(500).json({ error: 'Failed to list jobs' });
+  }
+}
+
+
+app.get('/api/jobs/result/:job_id', getJobResultHandler);
+
+
+app.get('/api/jobs/list', getJobResultList);
+
+
+app.use('/public', express.static(publicDir)); // Serve static files
+
+app.use((req, res) => {
+    const indexPath = path.join(publicDir, 'index.html');
+    if (!fs.existsSync(indexPath)) {
+        return res.status(404).send('index.html not found');
+    }
+    res.sendFile(indexPath);
+});
+
+app.listen(port, '0.0.0.0', () => {
+    console.log(`=======================================================`);
+    console.log(`  Benchmark API Server is running!`);
+    console.log(`  Backend API: http://0.0.0.0:${port}/api/...`);
+    console.log(`  Static Files: http://0.0.0.0:${port}/public/...`);
+    console.log(`=======================================================`);
+    console.log(`\nMonitoring for jobs...`);
+  });
+
